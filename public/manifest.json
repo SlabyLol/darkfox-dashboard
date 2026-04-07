@@ -1,0 +1,8 @@
+{
+  "name": "DarkFox Terminal",
+  "short_name": "DarkFox",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#f97316"
+}
