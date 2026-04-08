@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 
-let taskStorage: Record<string, boolean> = {};
+// Simulierter Speicher (In-Memory)
+let crewData: Record<string, { status: string, mission: string }> = {};
 
 export async function POST(request: Request) {
-  const { email, done } = await request.json();
-  taskStorage[email] = done;
+  const { email, status, mission } = await request.json();
+  crewData[email] = { status, mission };
   return NextResponse.json({ success: true });
 }
 
 export async function GET() {
-  return NextResponse.json({ statuses: taskStorage });
+  return NextResponse.json({ updates: crewData });
 }
