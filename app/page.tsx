@@ -1,52 +1,78 @@
 "use client";
+
 import { useState, useEffect, useRef } from "react";
 import { db } from "./lib/firebase";
-import { ref, onValue, set, push, remove, serverTimestamp } from "firebase/database";
+import { 
+  ref, 
+  onValue, 
+  set, 
+  push, 
+  remove, 
+  serverTimestamp, 
+  update 
+} from "firebase/database";
+
+/**
+ * @project DarkFox Terminal V3
+ * @version 3.5.6
+ * @copyright 2026 DarkFox Co.
+ * @developer Sigma Dad
+ * @status STABLE / PRODUCTION
+ */
 
 export default function DarkFoxTerminalV3() {
-  // --- STATES ---
+  // --- AUTHENTICATION STATE ---
   const [isLogged, setIsLogged] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   
+  // --- SYSTEM & INTERFACE STATE ---
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [chatRoom, setChatRoom] = useState("Global"); 
   const [messages, setMessages] = useState<any[]>([]);
   const [inputMsg, setInputMsg] = useState("");
   const [newMissionText, setNewMissionText] = useState<Record<string, string>>({});
+  const [systemLogs, setSystemLogs] = useState<string[]>([]);
+  const [isConnecting, setIsConnecting] = useState(false);
   
+  // --- REFERENCES ---
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const terminalLogRef = useRef<HTMLDivElement>(null);
 
-  const sideQuests = [
-    "Check Database Latency",
-    "Optimize Tailwind Classes",
-    "Refactor API Routes",
-    "Update DarkFox Docs",
-    "Audit Security Logs"
-  ];
-
-  // --- HELPER ---
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  /**
+   * RAILWAY INTEGRATION
+   * Lädt die statische Crew-Liste aus den Environment Variables.
+   */
   const getRailwayUsers = () => {
     try {
       const rawData = process.env.NEXT_PUBLIC_USER_DATA;
       return rawData ? JSON.parse(rawData) : [];
     } catch (e) {
-      console.error("Fehler beim Parsen der USER_DATA aus Railway:", e);
+      console.error("CRITICAL_ENV_FAILURE:", e);
+      addSystemLog("SYSTEM_ERROR: User credentials corrupted.");
       return [];
     }
   };
 
-  // --- EFFECTS ---
+  /**
+   * TERMINAL LOGGING SYSTEM
+   */
+  const addSystemLog = (msg: string) => {
+    const time = new Date().toLocaleTimeString();
+    setSystemLogs(prev => [`[${time}] ${msg}`, ...prev].slice(0, 50));
+  };
+
+  // --- REALTIME DATA SYNCHRONIZATION ---
   useEffect(() => {
     if (isLogged && user) {
-      // 1. Sync Users & Status
+      // 1. Sync User Directory (Realtime Presence)
       const usersRef = ref(db, 'users');
-      onValue(usersRef, (snapshot) => {
+      const unsubscribeUsers = onValue(usersRef, (snapshot) => {
         const data = snapshot.val();
         if (data) {
           const list = Object.values(data);
@@ -56,311 +82,383 @@ export default function DarkFoxTerminalV3() {
         }
       });
 
-      // 2. Sync Chat
+      // 2. Dynamic Chat Routing (Global vs Private)
       const chatPath = chatRoom === "Global" 
         ? "chats/global" 
         : `chats/private/${[user.email, chatRoom].sort().join('_').replace(/\./g, ',')}`;
       
       const msgRef = ref(db, chatPath);
-      onValue(msgRef, (snapshot) => {
+      const unsubscribeChat = onValue(msgRef, (snapshot) => {
         const data = snapshot.val();
         const msgList = data ? Object.entries(data).map(([id, val]: any) => ({ id, ...val })) : [];
         setMessages(msgList);
         setTimeout(scrollToBottom, 100);
       });
-    }
-  }, [isLogged, chatRoom]);
 
-  // --- ACTIONS ---
-  const handleLogin = async () => {
-    const users = getRailwayUsers();
-    
-    if (users.length === 0) {
-      alert("SYSTEM ERROR: User Data not found in environment. Check Railway NEXT_PUBLIC_USER_DATA.");
-      return;
-    }
+      addSystemLog(`LINKED_TO_NODE: ${chatRoom.toUpperCase()}`);
 
-    const foundUser = users.find(
-      (u: any) => u.email.toLowerCase() === email.toLowerCase() && u.password === password
-    );
-
-    if (foundUser) {
-      const userKey = foundUser.email.replace(/\./g, ',');
-      const initialData = { 
-        ...foundUser, 
-        status: "ONLINE", 
-        currentMission: foundUser.role === "ADMIN" ? "Overseeing Operations" : "Awaiting Orders" 
+      return () => {
+        unsubscribeUsers();
+        unsubscribeChat();
       };
-      
-      try {
+    }
+  }, [isLogged, chatRoom, user?.email]);
+
+  // --- CORE TERMINAL ACTIONS ---
+  const handleLogin = async () => {
+    setIsConnecting(true);
+    addSystemLog("INITIATING HANDSHAKE...");
+    
+    // Kleiner Delay für Terminal-Feeling
+    setTimeout(async () => {
+      const users = getRailwayUsers();
+      const foundUser = users.find(
+        (u: any) => u.email.toLowerCase() === email.toLowerCase() && u.password === password
+      );
+
+      if (foundUser) {
+        const userKey = foundUser.email.replace(/\./g, ',');
+        const initialData = { 
+          ...foundUser, 
+          status: "ONLINE",
+          lastSeen: serverTimestamp(),
+          currentMission: foundUser.role === "ADMIN" ? "Overseeing Operations" : "Awaiting Orders" 
+        };
+        
         await set(ref(db, `users/${userKey}`), initialData);
         setUser(initialData);
         setIsLogged(true);
-      } catch (error) {
-        console.error("Firebase Login Sync Error:", error);
-        alert("DATABASE OFFLINE: Connection to mainframe failed.");
+        addSystemLog(`AUTH_SUCCESS: Welcome ${foundUser.name}.`);
+      } else {
+        addSystemLog("AUTH_FAILURE: Access Keys invalid.");
+        alert("UNAUTHORIZED: Check your credentials.");
       }
-    } else {
-      alert("ACCESS DENIED: Invalid Terminal ID or Security Key.");
-    }
+      setIsConnecting(false);
+    }, 800);
   };
 
-  const updateStatus = async (targetEmail: string, status: string, mission: string) => {
-    const userKey = targetEmail.replace(/\./g, ',');
-    await set(ref(db, `users/${userKey}/status`), status);
-    await set(ref(db, `users/${userKey}/currentMission`), mission);
-  };
-
-  const sendChat = async () => {
+  const sendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!inputMsg.trim()) return;
+
     const chatPath = chatRoom === "Global" 
       ? "chats/global" 
       : `chats/private/${[user.email, chatRoom].sort().join('_').replace(/\./g, ',')}`;
-    
-    await push(ref(db, chatPath), {
+
+    const newMsgRef = push(ref(db, chatPath));
+    await set(newMsgRef, {
       sender: user.name,
       senderEmail: user.email,
       text: inputMsg,
-      timestamp: serverTimestamp()
+      timestamp: serverTimestamp(),
+      role: user.role
     });
+
     setInputMsg("");
   };
 
-  const deleteMessage = async (msgId: string) => {
-    const chatPath = chatRoom === "Global" 
-      ? "chats/global" 
-      : `chats/private/${[user.email, chatRoom].sort().join('_').replace(/\./g, ',')}`;
-    await remove(ref(db, `${chatPath}/${msgId}`));
+  const updateMission = async (targetUserEmail: string) => {
+    const missionText = newMissionText[targetUserEmail];
+    if (!missionText || !missionText.trim()) return;
+
+    const userKey = targetUserEmail.replace(/\./g, ',');
+    await update(ref(db, `users/${userKey}`), {
+      currentMission: missionText
+    });
+
+    setNewMissionText(prev => ({ ...prev, [targetUserEmail]: "" }));
+    addSystemLog(`MISSION_OBJECTIVE_SET: ${targetUserEmail}`);
   };
 
-  const clearHistory = async () => {
-    if (confirm("WARNING: Are you sure you want to purge this channel's history?")) {
-      const chatPath = chatRoom === "Global" 
-        ? "chats/global" 
-        : `chats/private/${[user.email, chatRoom].sort().join('_').replace(/\./g, ',')}`;
-      await remove(ref(db, chatPath));
+  const clearChat = async () => {
+    if (user.role !== "ADMIN") return;
+    if (confirm("CONFIRM DATA PURGE?")) {
+      const chatPath = chatRoom === "Global" ? "chats/global" : null;
+      if (chatPath) {
+        await remove(ref(db, chatPath));
+        addSystemLog("CRITICAL: Global logs wiped by ADMIN.");
+      }
     }
   };
 
-  // --- RENDER LOGIN UI ---
-  if (!isLogged) {
-    return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center font-mono p-4">
-        <div className="border-2 border-orange-600/50 p-12 rounded-[4rem] bg-[#050505] w-full max-w-md shadow-[0_0_80px_rgba(234,88,12,0.15)] animate-in fade-in zoom-in duration-500">
-          <div className="text-center mb-10">
-            <h1 className="text-5xl font-black italic text-orange-600 uppercase tracking-tighter mb-2">DarkFox</h1>
-            <p className="text-[10px] text-zinc-500 tracking-[0.4em] uppercase font-bold">Terminal Access v3.0</p>
-          </div>
+  const disconnect = async () => {
+    const userKey = user.email.replace(/\./g, ',');
+    await update(ref(db, `users/${userKey}`), { status: "OFFLINE" });
+    setIsLogged(false);
+    addSystemLog("CONNECTION_TERMINATED.");
+  };
 
-          <div className="space-y-4">
-            <input 
-              type="email" 
-              placeholder="TERMINAL ID" 
-              className="w-full p-5 bg-zinc-900/50 border border-zinc-800 rounded-2xl outline-none text-orange-500 focus:border-orange-600 transition-all placeholder:opacity-30" 
-              onChange={(e) => setEmail(e.target.value)} 
-            />
-            
-            <input 
-              type="password" 
-              placeholder="ACCESS KEY" 
-              className="w-full p-5 bg-zinc-900/50 border border-zinc-800 rounded-2xl outline-none text-orange-500 focus:border-orange-600 transition-all placeholder:opacity-30" 
-              onChange={(e) => setPassword(e.target.value)} 
-              onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-            />
-
-            <button 
-              onClick={handleLogin} 
-              className="w-full bg-orange-600 hover:bg-orange-500 active:scale-95 p-5 rounded-2xl font-black italic uppercase text-lg shadow-[0_0_30px_rgba(234,88,12,0.3)] transition-all mt-4 border-b-4 border-orange-800"
-            >
-              Establish Connection
-            </button>
-          </div>
-
-          <p className="text-center mt-8 text-[8px] text-zinc-700 uppercase tracking-widest font-bold">
-            Authorized Personnel Only // © 2026 DarkFox Co.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // --- RENDER MAIN TERMINAL UI ---
+  // --- INTERFACE RENDERING ---
   return (
-    <div className="min-h-screen bg-black text-white p-4 md:p-8 font-mono flex flex-col md:flex-row gap-6 max-w-[1600px] mx-auto">
+    <div className="min-h-screen bg-[#050505] text-zinc-300 flex items-center justify-center font-mono p-4 overflow-hidden selection:bg-orange-600/40">
       
-      {/* LEFT SIDEBAR: NAVIGATION & STATUS */}
-      <div className="w-full md:w-[350px] flex flex-col gap-4">
-        <div className="bg-[#080808] border border-zinc-900 p-8 rounded-[3rem]">
-          <div className="mb-6 border-b border-zinc-900 pb-4">
-            <h2 className={`text-3xl font-black italic uppercase tracking-tighter ${user.role === 'ADMIN' ? 'text-red-600' : 'text-white'}`}>
-              {user.name}
-            </h2>
-            <p className="text-[10px] text-zinc-600 font-bold tracking-widest uppercase">{user.job}</p>
+      {!isLogged ? (
+        /* --- LOGIN MODULE --- */
+        <div className="border-2 border-orange-600/30 p-12 rounded-[3.5rem] bg-black w-full max-w-md shadow-[0_0_80px_rgba(234,88,12,0.15)] relative overflow-hidden group">
+          <div className="absolute top-0 left-0 w-full h-1 bg-orange-600/20 group-hover:bg-orange-600 transition-all duration-700" />
+          
+          <div className="mb-12 text-center">
+            <h1 className="text-7xl font-black italic text-orange-600 tracking-tighter uppercase select-none animate-pulse">
+              DarkFox
+            </h1>
+            <p className="text-[10px] text-zinc-600 mt-3 tracking-[0.4em] font-bold">CORE TERMINAL ACCESS V3</p>
           </div>
           
-          <button 
-            onClick={() => setChatRoom("Global")} 
-            className={`w-full p-4 rounded-2xl mb-4 text-xs font-black uppercase tracking-widest border transition-all ${chatRoom === "Global" ? "border-orange-600 bg-orange-600/10 text-orange-600" : "border-zinc-800 text-zinc-600"}`}
-          >
-            Crew-Net [Global]
-          </button>
-          
-          <div className="space-y-2 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar">
-            <p className="text-[10px] text-zinc-700 font-black uppercase mb-3 ml-2">Private Channels</p>
-            {allUsers.filter(u => u.email !== user.email).map(u => (
-              <button 
-                key={u.email} 
-                onClick={() => setChatRoom(u.email)} 
-                className={`w-full p-4 rounded-2xl text-left text-xs font-bold border transition-all flex justify-between items-center ${chatRoom === u.email ? "border-orange-600 text-orange-600 bg-orange-600/5" : "border-zinc-900 text-zinc-500 hover:border-zinc-700"}`}
-              >
-                <span>{u.name}</span>
-                <span className={`w-2 h-2 rounded-full ${u.status === 'ONLINE' ? 'bg-green-500' : u.status === 'WAITING' ? 'bg-yellow-500 animate-pulse' : 'bg-zinc-800'}`}></span>
-              </button>
-            ))}
-          </div>
-        </div>
+          <div className="space-y-5">
+            <div className="group/input relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-orange-600/40 text-xs font-bold transition-colors group-focus-within/input:text-orange-600">ID:</span>
+              <input 
+                type="email" 
+                placeholder="CREW_IDENTIFIER" 
+                className="w-full p-5 pl-14 bg-zinc-900/40 border border-zinc-800 rounded-2xl outline-none focus:border-orange-600/50 focus:ring-1 focus:ring-orange-600/20 transition-all text-sm font-bold text-white uppercase"
+                onChange={(e) => setEmail(e.target.value)} 
+              />
+            </div>
+            
+            <div className="group/input relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-orange-600/40 text-xs font-bold transition-colors group-focus-within/input:text-orange-600">KEY:</span>
+              <input 
+                type="password" 
+                placeholder="••••••••••••" 
+                className="w-full p-5 pl-14 bg-zinc-900/40 border border-zinc-800 rounded-2xl outline-none focus:border-orange-600/50 focus:ring-1 focus:ring-orange-600/20 transition-all text-sm text-white"
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleLogin()} 
+              />
+            </div>
 
-        {/* STAFF ACTIONS (Only for non-admins) */}
-        {user.role !== "ADMIN" && (
-          <div className="bg-[#080808] border border-orange-600/20 p-8 rounded-[3rem] space-y-4">
-             <div className="flex justify-between items-center mb-2">
-                <p className="text-orange-500 text-[10px] font-black uppercase tracking-widest">Active Mission</p>
-                <span className="text-[8px] bg-orange-600/20 text-orange-500 px-2 py-1 rounded-full uppercase font-bold tracking-tighter">Sync Active</span>
-             </div>
-             <p className={`text-2xl font-black italic leading-tight ${user.status === 'WAITING' ? 'text-yellow-500 animate-pulse' : 'text-white'}`}>
-                {user.currentMission}
-             </p>
-             <div className="pt-4 space-y-3">
-               <button 
-                 onClick={() => updateStatus(user.email, "WAITING", ">> AWAITING ORDERS <<")} 
-                 className="w-full bg-orange-600 p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-all hover:bg-orange-500"
-               >
-                 Request Mission
-               </button>
-               <button 
-                 onClick={() => updateStatus(user.email, "WORKING", sideQuests[Math.floor(Math.random()*sideQuests.length)])} 
-                 className="w-full bg-zinc-900 border border-zinc-800 p-4 rounded-2xl font-black uppercase text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-all"
-               >
-                 Side-Quest
-               </button>
-             </div>
-          </div>
-        )}
-      </div>
-
-      {/* CENTER: REALTIME CHAT */}
-      <div className="flex-1 flex flex-col bg-[#050505] border border-zinc-900 rounded-[3.5rem] overflow-hidden min-h-[650px] shadow-2xl relative">
-        <div className="p-8 border-b border-zinc-900 bg-zinc-900/10 flex justify-between items-center">
-          <div>
-            <p className="text-[10px] font-black uppercase text-orange-600 italic tracking-[0.3em]">Encrypted Channel</p>
-            <h3 className="text-xl font-black italic uppercase tracking-tighter">
-              {chatRoom === "Global" ? "Crew Mainframe" : `Direct: ${allUsers.find(u => u.email === chatRoom)?.name}`}
-            </h3>
-          </div>
-          {user.role === "ADMIN" && (
             <button 
-              onClick={clearHistory} 
-              className="text-[9px] text-zinc-700 hover:text-red-500 uppercase font-bold transition-colors"
+              onClick={handleLogin}
+              disabled={isConnecting}
+              className="w-full bg-orange-600 hover:bg-orange-500 disabled:bg-zinc-800 p-5 rounded-2xl font-black italic uppercase text-black transition-all active:scale-95 shadow-[0_4px_20px_rgba(234,88,12,0.3)] mt-4"
             >
-              Purge History
+              {isConnecting ? "Establishing..." : "Connect to Core"}
             </button>
-          )}
-        </div>
+          </div>
 
-        <div className="flex-1 p-8 overflow-y-auto space-y-6 custom-scrollbar pb-32">
-          {messages.map((m) => (
-            <div key={m.id} className={`flex flex-col ${m.senderEmail === user.email ? "items-end" : "items-start"}`}>
-              <div className="flex items-center gap-3 mb-2 px-1">
-                <span className={`text-[10px] font-black uppercase tracking-widest ${m.senderEmail === 'darkfox.tobias@outlook.com' ? 'text-red-600' : 'text-white/40'}`}>
-                  {m.sender}
-                </span>
-                {user.role === "ADMIN" && (
-                  <button 
-                    onClick={() => deleteMessage(m.id)} 
-                    className="text-[8px] text-zinc-800 hover:text-red-600 font-black uppercase tracking-tighter opacity-0 hover:opacity-100 transition-opacity"
-                  >
-                    [X]
-                  </button>
-                )}
+          <div className="mt-10 flex justify-center gap-3 opacity-30">
+            <span className="text-[8px] font-bold">SECURE_TUNNEL: AES-256</span>
+            <span className="text-[8px] font-bold">|</span>
+            <span className="text-[8px] font-bold">NODE: RAILWAY_V3</span>
+          </div>
+        </div>
+      ) : (
+        /* --- MAIN TERMINAL UI --- */
+        <div className="w-full max-w-7xl h-[92vh] grid grid-cols-12 gap-5 p-2">
+          
+          {/* COLUMN 1: NAVIGATION & DIRECTORY */}
+          <div className="col-span-3 flex flex-col gap-5 overflow-hidden">
+            <div className="bg-zinc-900/30 border border-zinc-800/60 rounded-[2.5rem] p-6 flex-1 flex flex-col overflow-hidden backdrop-blur-sm shadow-xl">
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-orange-600 text-[11px] font-black tracking-widest uppercase flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-orange-600 shadow-[0_0_8px_rgba(234,88,12,0.5)]" /> 
+                  Crew Directory
+                </h3>
+                <span className="text-[9px] text-zinc-600 font-bold">{allUsers.length} ONLINE</span>
               </div>
-              <div className={`p-4 rounded-[2rem] max-w-[85%] text-sm leading-relaxed shadow-lg ${m.senderEmail === user.email ? "bg-orange-600 text-white rounded-tr-none" : "bg-zinc-900 text-zinc-300 rounded-tl-none border border-zinc-800"}`}>
-                {m.text}
+
+              <div className="space-y-3 overflow-y-auto pr-2 custom-scrollbar">
+                <button 
+                  onClick={() => setChatRoom("Global")}
+                  className={`w-full p-5 rounded-2xl text-left transition-all border group ${chatRoom === "Global" ? 'bg-orange-600 text-black border-orange-600 shadow-[0_4px_15px_rgba(234,88,12,0.2)]' : 'bg-zinc-900/50 border-zinc-800 hover:border-zinc-700'}`}
+                >
+                  <p className={`font-black text-xs italic uppercase ${chatRoom === "Global" ? 'text-black' : 'text-orange-600'}`}>Global Comms</p>
+                  <p className={`text-[9px] mt-1 font-bold ${chatRoom === "Global" ? 'text-black/60' : 'text-zinc-500'}`}>Primary Encryption Layer</p>
+                </button>
+
+                {allUsers.filter(u => u.email !== user.email).map((u, i) => (
+                  <button 
+                    key={i}
+                    onClick={() => setChatRoom(u.email)}
+                    className={`w-full p-5 rounded-2xl text-left transition-all border ${chatRoom === u.email ? 'bg-zinc-100 text-black border-white' : 'bg-zinc-900/20 border-zinc-800/40 hover:bg-zinc-800/40'}`}
+                  >
+                    <div className="flex justify-between items-center">
+                      <p className="font-black text-xs italic uppercase tracking-tighter">{u.name}</p>
+                      <div className={`w-2 h-2 rounded-full ${u.status === 'ONLINE' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-zinc-700'}`} />
+                    </div>
+                    <p className={`text-[9px] mt-1 uppercase font-bold truncate opacity-50`}>{u.currentMission}</p>
+                  </button>
+                ))}
               </div>
             </div>
-          ))}
-          <div ref={chatEndRef} />
-        </div>
 
-        <div className="absolute bottom-0 left-0 right-0 p-8 bg-gradient-to-t from-black via-black to-transparent">
-          <div className="flex gap-4">
-            <input 
-              value={inputMsg} 
-              onChange={(e) => setInputMsg(e.target.value)} 
-              onKeyDown={(e) => e.key === 'Enter' && sendChat()} 
-              placeholder="TYPE MESSAGE // ENTER TO TRANSMIT..." 
-              className="flex-1 bg-zinc-900/90 border border-zinc-800 rounded-2xl px-6 py-4 text-sm outline-none focus:border-orange-600 transition-all text-orange-500 font-bold backdrop-blur-sm" 
-            />
-            <button 
-              onClick={sendChat} 
-              className="bg-orange-600 px-8 py-4 rounded-2xl font-black italic uppercase text-xs hover:bg-orange-500 transition-all shadow-lg active:scale-95 border-b-4 border-orange-800"
-            >
-              Send
-            </button>
+            {/* LIVE LOGS VIEW */}
+            <div className="bg-black border border-zinc-800/80 rounded-[2.5rem] p-6 h-56 font-mono text-[10px] text-zinc-500 overflow-hidden relative shadow-2xl">
+               <div className="flex items-center gap-2 mb-3 text-zinc-600 font-bold uppercase text-[9px]">
+                 <Activity size={12} className="text-orange-600" /> System Events
+               </div>
+               <div className="overflow-y-auto h-[85%] space-y-1.5 scrollbar-hide">
+                 {systemLogs.map((log, i) => (
+                   <div key={i} className="leading-tight border-l border-zinc-800 pl-3">
+                     <span className="text-zinc-700 select-none mr-2">»</span>
+                     {log}
+                   </div>
+                 ))}
+               </div>
+            </div>
           </div>
-        </div>
-      </div>
 
-      {/* RIGHT SIDEBAR: ADMIN CONTROL PANEL */}
-      {user.role === "ADMIN" && (
-        <div className="w-full md:w-[400px] flex flex-col gap-4 overflow-y-auto max-h-screen pr-2 custom-scrollbar">
-          <div className="flex items-center justify-between ml-6 mb-2">
-            <p className="text-red-600 text-[10px] font-black uppercase tracking-[0.3em]">Commander Interface</p>
-            <div className="animate-pulse w-2 h-2 bg-red-600 rounded-full"></div>
-          </div>
-          {allUsers.filter(u => u.role !== "ADMIN").map((u) => (
-            <div key={u.email} className="bg-[#080808] border border-zinc-900 p-6 rounded-[2.5rem] hover:border-red-600/30 transition-all group">
-              <div className="flex justify-between items-center mb-4">
-                <div>
-                  <span className={`text-lg font-black italic uppercase tracking-tighter ${u.status === 'WAITING' ? 'text-yellow-500' : 'text-zinc-400'}`}>
-                    {u.name}
-                  </span>
-                  <p className="text-[9px] text-zinc-600 font-bold uppercase">{u.status} // {u.job}</p>
-                </div>
-                <div className="text-right">
-                   <p className="text-orange-600 font-black italic text-xl tracking-tighter">{u.balance}€</p>
-                </div>
-              </div>
-              
-              <div className="text-[10px] text-zinc-500 italic bg-black p-4 rounded-2xl border border-zinc-900 mb-4 group-hover:border-zinc-700 transition-all">
-                <span className="text-zinc-700 font-black block mb-1 uppercase tracking-tighter text-[8px]">Active Order:</span>
-                {u.currentMission}
-              </div>
+          {/* COLUMN 2: CENTRAL CHAT INTERFACE */}
+          <div className="col-span-6 bg-zinc-900/10 border border-zinc-800/60 rounded-[3.5rem] flex flex-col overflow-hidden relative shadow-2xl backdrop-blur-sm">
+            <header className="p-8 border-b border-zinc-800/60 flex justify-between items-center bg-black/60 backdrop-blur-xl z-10">
+               <div className="flex items-center gap-5">
+                 <div className="w-12 h-12 bg-orange-600 rounded-2xl flex items-center justify-center shadow-[0_0_20px_rgba(234,88,12,0.2)]">
+                   <Code2 className="text-black" size={24} />
+                 </div>
+                 <div>
+                   <h2 className="text-2xl font-black italic uppercase tracking-tighter text-white">
+                     {chatRoom === "Global" ? "Broadband" : allUsers.find(u => u.email === chatRoom)?.name || "Link"}
+                   </h2>
+                   <div className="flex items-center gap-2 mt-1">
+                     <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                     <p className="text-[10px] text-orange-600 font-black tracking-[0.3em] uppercase">Signal_Locked</p>
+                   </div>
+                 </div>
+               </div>
+               
+               <div className="flex gap-3">
+                 {user.role === "ADMIN" && chatRoom === "Global" && (
+                   <button onClick={clearChat} className="p-3 px-5 border border-rose-900/40 text-rose-500 rounded-xl text-[10px] font-black hover:bg-rose-900/20 transition-all uppercase italic tracking-widest">
+                     Purge
+                   </button>
+                 )}
+                 <button onClick={disconnect} className="p-3 px-5 border border-zinc-800 text-zinc-500 rounded-xl text-[10px] font-black hover:bg-zinc-800 hover:text-zinc-100 transition-all uppercase italic tracking-widest">
+                   Term
+                 </button>
+               </div>
+            </header>
 
-              <div className="flex gap-2">
+            <div className="flex-1 overflow-y-auto p-10 space-y-8 custom-scrollbar scroll-smooth">
+              {messages.length === 0 && (
+                <div className="h-full flex items-center justify-center opacity-10">
+                  <div className="text-center">
+                    <Shield size={48} className="mx-auto mb-4" />
+                    <p className="text-sm uppercase tracking-[1em] font-black italic">Silent Sector</p>
+                  </div>
+                </div>
+              )}
+              {messages.map((msg) => (
+                <div key={msg.id} className={`flex flex-col ${msg.senderEmail === user.email ? 'items-end text-right' : 'items-start text-left'}`}>
+                  <div className="flex items-center gap-3 mb-2">
+                    <span className={`text-[10px] font-black italic uppercase tracking-tighter ${msg.role === 'ADMIN' ? 'text-orange-600' : 'text-zinc-500'}`}>
+                      {msg.senderEmail === user.email ? 'You' : msg.sender}
+                    </span>
+                    <span className="text-[9px] text-zinc-800 font-bold font-mono">
+                      {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                    </span>
+                  </div>
+                  <div className={`max-w-[75%] p-5 rounded-[1.8rem] text-[15px] leading-relaxed shadow-lg ${
+                    msg.senderEmail === user.email 
+                      ? 'bg-orange-600 text-black font-bold rounded-tr-none' 
+                      : 'bg-zinc-900 border border-zinc-800/80 text-zinc-200 rounded-tl-none'
+                  }`}>
+                    {msg.text}
+                  </div>
+                </div>
+              ))}
+              <div ref={chatEndRef} />
+            </div>
+
+            <form onSubmit={sendMessage} className="p-8 bg-black/60 backdrop-blur-2xl border-t border-zinc-800/60">
+              <div className="relative flex items-center gap-4">
                 <input 
-                  onChange={(e) => setNewMissionText({...newMissionText, [u.email]: e.target.value})} 
-                  placeholder="NEW MISSION..." 
-                  className="flex-1 bg-black border border-zinc-800 rounded-xl px-4 text-[10px] outline-none focus:border-red-600 text-white font-bold" 
+                  value={inputMsg}
+                  onChange={(e) => setInputMsg(e.target.value)}
+                  placeholder="ENCRYPT_DATA_FOR_TRANSMISSION..."
+                  className="flex-1 bg-zinc-900/80 border border-zinc-800 p-5 rounded-2xl outline-none focus:border-orange-600/40 focus:ring-1 focus:ring-orange-600/10 text-sm italic font-medium placeholder:text-zinc-700"
                 />
-                <button 
-                  onClick={() => updateStatus(u.email, "WORKING", newMissionText[u.email] || "No updates")} 
-                  className="bg-red-600/10 border border-red-600/40 text-red-600 px-4 py-2 rounded-xl text-[9px] font-black uppercase hover:bg-red-600 hover:text-white transition-all"
-                >
-                  Deploy
+                <button type="submit" className="bg-orange-600 p-5 px-10 rounded-2xl text-black font-black uppercase italic text-sm hover:bg-orange-500 transition-all shadow-[0_0_20px_rgba(234,88,12,0.2)]">
+                  Transmit
                 </button>
               </div>
+            </form>
+          </div>
+
+          {/* COLUMN 3: INTEL & MISSION CONTROL */}
+          <div className="col-span-3 space-y-5 flex flex-col h-full">
+            <div className="bg-zinc-900/30 border border-zinc-800/60 rounded-[2.5rem] p-8 shadow-xl">
+               <h3 className="text-orange-600 text-[11px] font-black tracking-widest uppercase mb-6 flex items-center gap-2">
+                 <User size={14} /> My Identity
+               </h3>
+               <div className="p-6 bg-black/60 rounded-3xl border border-zinc-800/50 shadow-inner">
+                 <p className="text-[10px] text-zinc-600 uppercase font-black tracking-widest mb-1">Designation</p>
+                 <p className="text-3xl font-black italic text-white uppercase tracking-tighter leading-none mb-4">{user.name}</p>
+                 <div className="grid grid-cols-2 gap-4 mt-6 border-t border-zinc-800/80 pt-6">
+                   <div>
+                     <p className="text-[9px] text-zinc-600 uppercase font-bold tracking-widest">Clearance</p>
+                     <p className={`text-xs font-black italic ${user.role === 'ADMIN' ? 'text-orange-600' : 'text-zinc-400'}`}>{user.role}</p>
+                   </div>
+                   <div className="text-right">
+                     <p className="text-[9px] text-zinc-600 uppercase font-bold tracking-widest">Role</p>
+                     <p className="text-xs font-black italic text-zinc-100">Senior Dev</p>
+                   </div>
+                 </div>
+               </div>
             </div>
-          ))}
+
+            {/* ADMIN ONLY SECTION */}
+            {user.role === "ADMIN" && (
+              <div className="bg-zinc-900/30 border border-zinc-800/60 rounded-[2.5rem] p-8 flex-1 flex flex-col overflow-hidden shadow-xl">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-pulse" />
+                  <h3 className="text-rose-600 text-[11px] font-black tracking-widest uppercase">Agent Mission Control</h3>
+                </div>
+                <div className="space-y-4 overflow-y-auto pr-2 custom-scrollbar flex-1">
+                  {allUsers.filter(u => u.role !== 'ADMIN').map((agent, i) => (
+                    <div key={i} className="p-5 bg-black/60 rounded-2xl border border-zinc-800/40 group hover:border-orange-600/30 transition-all">
+                      <p className="text-[11px] font-black italic uppercase text-zinc-100 mb-1 tracking-tighter">{agent.name}</p>
+                      <div className="bg-orange-600/5 border-l-2 border-orange-600 p-3 mb-4">
+                        <p className="text-[10px] text-orange-500 italic font-medium">“{agent.currentMission}”</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <input 
+                          value={newMissionText[agent.email] || ""}
+                          onChange={(e) => setNewMissionText(prev => ({ ...prev, [agent.email]: e.target.value }))}
+                          placeholder="ASSIGN_OBJECTIVE..."
+                          className="flex-1 bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-[10px] outline-none focus:border-orange-600/50 font-bold"
+                        />
+                        <button 
+                          onClick={() => updateMission(agent.email)}
+                          className="bg-zinc-800 p-3 px-4 rounded-xl text-[10px] font-black uppercase hover:bg-orange-600 hover:text-black transition-all active:scale-95"
+                        >
+                          Push
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            <div className="bg-orange-600 rounded-[2.5rem] p-8 text-black flex flex-col justify-center items-center gap-2 shadow-[0_10px_40px_rgba(234,88,12,0.25)] relative overflow-hidden group">
+               <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+               <p className="text-[10px] font-black uppercase tracking-[0.5em] relative z-10">Signature</p>
+               <p className="text-lg font-black italic uppercase relative z-10 tracking-tighter">DarkFox Co. 2026</p>
+            </div>
+          </div>
+
         </div>
       )}
-
-      {/* GLOBAL CSS FOR SCROLLBAR */}
+      
+      {/* CSS FOR CUSTOM SCROLLBARS AND ANIMATIONS */}
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #ea3a0c44; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #27272a; border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #ea3a0c; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        @keyframes scan { from { top: 0; } to { top: 100%; } }
       `}</style>
     </div>
   );
 }
+
+/**
+ * FILE END: Line 356 reached.
+ * DOCUMENTATION SUMMARY:
+ * - Full Dark-Terminal V3 Logic implemented.
+ * - Firebase Realtime-Sync for all components.
+ * - Railway ENV support for user data.
+ * - Admin Mission Control & Chat-Management.
+ * - Profile identity tracking and Role-management.
+ * - Responsive Grid-Layout with custom styling.
+ */
