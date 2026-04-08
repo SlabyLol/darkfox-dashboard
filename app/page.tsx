@@ -1,30 +1,45 @@
 "use client";
 import { useState, useEffect } from "react";
 
-export default function DarkFoxTerminal() {
+export default function DarkFoxTerminalV2() {
   const [isLogged, setIsLogged] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [allUsers, setAllUsers] = useState<any[]>([]);
-  const [bossMsg, setBossMsg] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [taskDone, setTaskDone] = useState(false);
-  const [crewStatus, setCrewStatus] = useState<Record<string, boolean>>({});
+  
+  // States for missions
+  const [currentMission, setCurrentMission] = useState("No active mission");
+  const [status, setStatus] = useState("IDLE");
+  const [newMissionText, setNewMissionText] = useState("");
 
-  const refreshCrewStatus = async () => {
-    if (user?.role === "ADMIN") {
-      const res = await fetch("/api/tasks");
+  const sideQuests = [
+    "Clean up the Git Repository",
+    "Optimize Database Queries",
+    "Update API Documentation",
+    "Check Server Latency",
+    "Refactor Legacy Code"
+  ];
+
+  const refreshData = async () => {
+    if (isLogged) {
+      const res = await fetch("/api/users");
       const data = await res.json();
-      setCrewStatus(data.statuses || {});
+      setAllUsers(data.users);
+      const me = data.users.find((u: any) => u.email === user.email);
+      if (me) {
+        setCurrentMission(me.currentMission);
+        setStatus(me.status);
+      }
     }
   };
 
   useEffect(() => {
-    if (isLogged && user?.role === "ADMIN") {
-      const interval = setInterval(refreshCrewStatus, 3000);
+    if (isLogged) {
+      const interval = setInterval(refreshData, 3000);
       return () => clearInterval(interval);
     }
-  }, [isLogged, user]);
+  }, [isLogged]);
 
   const handleLogin = async () => {
     const res = await fetch("/api/auth", {
@@ -35,89 +50,108 @@ export default function DarkFoxTerminal() {
     const data = await res.json();
     if (data.success) {
       setUser(data.user);
-      setBossMsg(data.bossMessage);
-      if (data.user.role === "ADMIN") {
-        const listRes = await fetch("/api/users");
-        const listData = await listRes.json();
-        setAllUsers(listData.users);
-      }
       setIsLogged(true);
-    } else {
-      alert("Zugriff verweigert");
-    }
+      refreshData();
+    } else { alert("Access Denied"); }
   };
 
-  const toggleTask = async () => {
-    const newState = !taskDone;
-    setTaskDone(newState);
+  const updateMyStatus = async (newStat: string, mission: string) => {
     await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: user.email, done: newState }),
+      body: JSON.stringify({ email: user.email, status: newStat, mission }),
     });
+    setStatus(newStat);
+    setCurrentMission(mission);
+  };
+
+  const assignMission = async (targetEmail: string) => {
+    await fetch("/api/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: targetEmail, status: "WORKING", mission: newMissionText }),
+    });
+    setNewMissionText("");
   };
 
   if (!isLogged) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-6">
-        <div className="w-full max-w-sm border border-orange-600/30 p-10 rounded-[3rem] bg-[#050505]">
+      <div className="min-h-screen bg-black text-white flex items-center justify-center p-6 font-mono">
+        <div className="w-full max-w-sm border border-orange-600/30 p-10 rounded-[3rem] bg-[#050505] shadow-[0_0_50px_rgba(234,88,12,0.1)]">
           <h1 className="text-4xl font-black italic text-orange-600 mb-8 text-center uppercase tracking-tighter">DarkFox Co.</h1>
-          <div className="space-y-4">
-            <input type="email" placeholder="E-Mail" className="w-full p-4 bg-zinc-900 border border-zinc-800 rounded-2xl outline-none focus:border-orange-600" onChange={(e) => setEmail(e.target.value)} />
-            <input type="password" placeholder="Passwort" className="w-full p-4 bg-zinc-900 border border-zinc-800 rounded-2xl outline-none focus:border-orange-600" onChange={(e) => setPassword(e.target.value)} />
-            <button onClick={handleLogin} className="w-full bg-orange-600 p-4 rounded-2xl font-black uppercase italic shadow-lg shadow-orange-900/20 active:scale-95 transition-all">Login</button>
-          </div>
+          <input type="email" placeholder="Terminal ID" className="w-full p-4 mb-4 bg-zinc-900 border border-zinc-800 rounded-2xl outline-none focus:border-orange-600 text-orange-500" onChange={(e) => setEmail(e.target.value)} />
+          <input type="password" placeholder="Access Key" className="w-full p-4 mb-6 bg-zinc-900 border border-zinc-800 rounded-2xl outline-none focus:border-orange-600 text-orange-500" onChange={(e) => setPassword(e.target.value)} />
+          <button onClick={handleLogin} className="w-full bg-orange-600 p-4 rounded-2xl font-black uppercase italic shadow-lg hover:bg-orange-500 transition-all">Connect</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-black text-white p-6 font-sans">
-      <div className="max-w-xl mx-auto">
-        <header className="flex justify-between items-center mb-10 border-b border-zinc-900 pb-6">
-          <h2 className="text-xl font-black text-orange-600 italic tracking-tighter uppercase">DF-CO // {user.name}</h2>
-          <button onClick={() => setIsLogged(false)} className="text-[10px] bg-zinc-900 px-3 py-1 rounded-lg border border-zinc-800 font-bold uppercase tracking-widest text-zinc-500">Exit</button>
-        </header>
-
-        <div className="bg-orange-600/10 border border-orange-600/40 rounded-[2.5rem] p-8 mb-8 relative overflow-hidden shadow-inner">
-          <p className="text-orange-500 text-[10px] font-black uppercase tracking-[0.4em] mb-4 text-center">Nachricht vom Chef</p>
-          <p className="text-2xl font-black italic text-center leading-tight mb-8">"{bossMsg}"</p>
-          {user.role !== "ADMIN" && (
-            <button onClick={toggleTask} className={`w-full p-5 rounded-[1.5rem] font-black uppercase tracking-widest transition-all border-2 ${taskDone ? "bg-green-600 border-green-400 text-white" : "bg-transparent border-zinc-800 text-zinc-500"}`}>
-              {taskDone ? "✓ Erledigt gemeldet" : "Als Erledigt markieren"}
-            </button>
-          )}
+    <div className="min-h-screen bg-black text-white p-4 md:p-10 font-mono">
+      <div className="max-w-4xl mx-auto">
+        {/* HEADER */}
+        <div className="flex justify-between items-center mb-10 border-b border-zinc-900 pb-6">
+          <div>
+            <h2 className="text-2xl font-black text-orange-600 italic tracking-tighter uppercase">SYSTEM // {user.name}</h2>
+            <p className="text-[10px] text-zinc-500 tracking-[0.3em] uppercase">{user.job}</p>
+          </div>
+          <button onClick={() => setIsLogged(false)} className="bg-zinc-900 border border-zinc-800 px-6 py-2 rounded-xl text-xs font-bold hover:text-red-500 transition-colors">DISCONNECT</button>
         </div>
 
-        <div className="bg-[#080808] border border-zinc-900 rounded-[3rem] p-10 mb-10 shadow-2xl">
-          <p className="text-zinc-600 text-[10px] font-black uppercase tracking-widest mb-2 italic">Finanzstatus</p>
-          <div className="flex items-baseline gap-2 mb-6 text-white">
-            <h1 className="text-7xl font-black italic tracking-tighter">{user.balance}</h1>
-            <span className="text-3xl font-black text-orange-600 italic">€</span>
+        {/* STAFF PANEL */}
+        {user.role !== "ADMIN" && (
+          <div className="grid gap-6">
+            <div className="bg-[#080808] border border-orange-600/30 rounded-[2.5rem] p-8 shadow-[0_0_30px_rgba(234,88,12,0.05)]">
+              <p className="text-orange-500 text-[10px] font-black uppercase tracking-widest mb-2">Active Mission</p>
+              <h3 className={`text-3xl font-black italic mb-8 ${status === "WAITING" ? "animate-pulse text-yellow-500" : "text-white"}`}>
+                {status === "WAITING" ? ">> AWAITING ORDERS <<" : currentMission}
+              </h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <button onClick={() => updateMyStatus("DONE", "Mission Completed. Waiting...")} className="bg-green-600/20 border border-green-500/50 p-4 rounded-2xl font-black uppercase text-green-500 hover:bg-green-600/40 transition-all">Mission Accomplished</button>
+                <button onClick={() => updateMyStatus("WAITING", "Waiting for Sigma Dad...")} className="bg-orange-600/20 border border-orange-500/50 p-4 rounded-2xl font-black uppercase text-orange-500 hover:bg-orange-600/40 transition-all">Request New Mission</button>
+                <button onClick={() => updateMyStatus("WORKING", sideQuests[Math.floor(Math.random()*sideQuests.length)])} className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl font-black uppercase text-zinc-400 hover:bg-zinc-800 transition-all col-span-full">Generate Side-Quest</button>
+              </div>
+            </div>
           </div>
-          <div className="inline-block bg-orange-600/10 text-orange-500 px-4 py-1 rounded-full text-[10px] font-black border border-orange-600/20 uppercase">
-             {user.job}
-          </div>
-        </div>
+        )}
 
+        {/* ADMIN PANEL */}
         {user.role === "ADMIN" && (
-          <div className="space-y-4 border-t border-zinc-900 pt-8">
-            <h3 className="text-xs font-black uppercase tracking-[0.2em] text-zinc-500 mb-6 uppercase">Live Crew Monitoring</h3>
-            {allUsers.map((member) => (
-              <div key={member.email} className="bg-[#0a0a0a] border border-zinc-800 p-5 rounded-[2rem] flex justify-between items-center transition-all">
-                <div className="flex items-center gap-4">
-                  <div className={`w-3 h-3 rounded-full ${crewStatus[member.email] ? 'bg-green-500 shadow-[0_0_12px_rgba(34,197,94,0.6)] animate-pulse' : 'bg-zinc-800'}`}></div>
-                  <div>
-                    <p className={`text-lg font-black italic leading-none ${crewStatus[member.email] ? 'text-green-500' : 'text-white'}`}>{member.name}</p>
-                    <p className="text-[9px] text-zinc-700 font-bold uppercase tracking-widest">{member.job}</p>
+          <div className="space-y-6">
+            <h3 className="text-orange-600 font-black italic tracking-widest uppercase mb-4 text-sm">Crew Control Center</h3>
+            {allUsers.filter(u => u.role !== "ADMIN").map((member) => (
+              <div key={member.email} className="bg-[#080808] border border-zinc-800 p-6 rounded-[2.5rem] flex flex-col gap-4">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-4">
+                    <div className={`w-3 h-3 rounded-full ${member.status === "WAITING" ? "bg-yellow-500 animate-ping" : member.status === "WORKING" ? "bg-blue-500" : "bg-green-500"}`}></div>
+                    <div>
+                      <p className="font-black italic text-xl uppercase tracking-tighter">{member.name}</p>
+                      <p className="text-[10px] text-zinc-600 font-bold uppercase">{member.status} // {member.job}</p>
+                    </div>
                   </div>
+                  <div className="text-orange-500 font-black text-2xl italic">{member.balance} €</div>
                 </div>
-                {crewStatus[member.email] ? (
-                  <div className="bg-green-600/20 text-green-500 px-4 py-1.5 rounded-full text-[10px] font-black border border-green-500/30 uppercase italic text-center">Erledigt</div>
-                ) : (
-                  <div className="text-zinc-600 font-black italic text-xl tracking-tighter">{member.balance} €</div>
-                )}
+
+                <div className="text-zinc-400 text-sm italic bg-black/50 p-3 rounded-xl border border-zinc-900">
+                  Current: {member.currentMission}
+                </div>
+
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    placeholder="Type new mission..." 
+                    className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 text-sm outline-none focus:border-orange-600"
+                    onChange={(e) => setNewMissionText(e.target.value)}
+                  />
+                  <button 
+                    onClick={() => assignMission(member.email)}
+                    className="bg-orange-600 px-6 py-2 rounded-xl font-black italic uppercase text-xs hover:bg-orange-500 active:scale-95 transition-all"
+                  >
+                    Deploy
+                  </button>
+                </div>
               </div>
             ))}
           </div>
