@@ -1,45 +1,39 @@
 "use client";
 import { useState, useEffect } from "react";
+import { db } from "./lib/firebase";
+import { ref, onValue, set, push, remove, serverTimestamp } from "firebase/database";
 
-export default function DarkFoxTerminalV2() {
+export default function DarkFoxTerminalV3() {
   const [isLogged, setIsLogged] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [chatRoom, setChatRoom] = useState("Global"); // Global oder Email des Partners
+  const [messages, setMessages] = useState<any[]>([]);
+  const [inputMsg, setInputMsg] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  
-  // States for missions
-  const [currentMission, setCurrentMission] = useState("No active mission");
-  const [status, setStatus] = useState("IDLE");
-  const [newMissionText, setNewMissionText] = useState("");
+  const [newMissionText, setNewMissionText] = useState<Record<string, string>>({});
 
-  const sideQuests = [
-    "Clean up the Git Repository",
-    "Optimize Database Queries",
-    "Update API Documentation",
-    "Check Server Latency",
-    "Refactor Legacy Code"
-  ];
-
-  const refreshData = async () => {
-    if (isLogged) {
-      const res = await fetch("/api/users");
-      const data = await res.json();
-      setAllUsers(data.users);
-      const me = data.users.find((u: any) => u.email === user.email);
-      if (me) {
-        setCurrentMission(me.currentMission);
-        setStatus(me.status);
-      }
-    }
-  };
+  const sideQuests = ["Clean Repo", "Check API", "Fix CSS", "Update Docs"];
 
   useEffect(() => {
     if (isLogged) {
-      const interval = setInterval(refreshData, 3000);
-      return () => clearInterval(interval);
+      // Listen for all users & missions
+      const usersRef = ref(db, 'users');
+      onValue(usersRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) setAllUsers(Object.values(data));
+      });
+
+      // Listen for messages
+      const chatPath = chatRoom === "Global" ? "chats/global" : `chats/private/${[user.email, chatRoom].sort().join('_').replace(/\./g, ',')}`;
+      const msgRef = ref(db, chatPath);
+      onValue(msgRef, (snapshot) => {
+        const data = snapshot.val();
+        setMessages(data ? Object.entries(data).map(([id, val]: any) => ({ id, ...val })) : []);
+      });
     }
-  }, [isLogged]);
+  }, [isLogged, chatRoom]);
 
   const handleLogin = async () => {
     const res = await fetch("/api/auth", {
@@ -49,114 +43,126 @@ export default function DarkFoxTerminalV2() {
     });
     const data = await res.json();
     if (data.success) {
-      setUser(data.user);
+      const userData = { ...data.user, status: "ONLINE", currentMission: "Idle" };
+      await set(ref(db, `users/${data.user.email.replace(/\./g, ',')}`), userData);
+      setUser(userData);
       setIsLogged(true);
-      refreshData();
     } else { alert("Access Denied"); }
   };
 
-  const updateMyStatus = async (newStat: string, mission: string) => {
-    await fetch("/api/tasks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: user.email, status: newStat, mission }),
-    });
-    setStatus(newStat);
-    setCurrentMission(mission);
+  const updateStatus = async (targetEmail: string, status: string, mission: string) => {
+    const path = `users/${targetEmail.replace(/\./g, ',')}`;
+    await set(ref(db, `${path}/status`), status);
+    await set(ref(db, `${path}/currentMission`), mission);
   };
 
-  const assignMission = async (targetEmail: string) => {
-    await fetch("/api/tasks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: targetEmail, status: "WORKING", mission: newMissionText }),
+  const sendChat = async () => {
+    if (!inputMsg.trim()) return;
+    const chatPath = chatRoom === "Global" ? "chats/global" : `chats/private/${[user.email, chatRoom].sort().join('_').replace(/\./g, ',')}`;
+    await push(ref(db, chatPath), {
+      sender: user.name,
+      senderEmail: user.email,
+      text: inputMsg,
+      timestamp: serverTimestamp()
     });
-    setNewMissionText("");
+    setInputMsg("");
+  };
+
+  const deleteMessage = async (msgId: string) => {
+    const chatPath = chatRoom === "Global" ? "chats/global" : `chats/private/${[user.email, chatRoom].sort().join('_').replace(/\./g, ',')}`;
+    await remove(ref(db, `${chatPath}/${msgId}`));
   };
 
   if (!isLogged) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-6 font-mono">
-        <div className="w-full max-w-sm border border-orange-600/30 p-10 rounded-[3rem] bg-[#050505] shadow-[0_0_50px_rgba(234,88,12,0.1)]">
-          <h1 className="text-4xl font-black italic text-orange-600 mb-8 text-center uppercase tracking-tighter">DarkFox Co.</h1>
-          <input type="email" placeholder="Terminal ID" className="w-full p-4 mb-4 bg-zinc-900 border border-zinc-800 rounded-2xl outline-none focus:border-orange-600 text-orange-500" onChange={(e) => setEmail(e.target.value)} />
-          <input type="password" placeholder="Access Key" className="w-full p-4 mb-6 bg-zinc-900 border border-zinc-800 rounded-2xl outline-none focus:border-orange-600 text-orange-500" onChange={(e) => setPassword(e.target.value)} />
-          <button onClick={handleLogin} className="w-full bg-orange-600 p-4 rounded-2xl font-black uppercase italic shadow-lg hover:bg-orange-500 transition-all">Connect</button>
+      <div className="min-h-screen bg-black text-white flex items-center justify-center font-mono">
+        <div className="border border-orange-600/30 p-10 rounded-[3rem] bg-[#050505] w-80">
+          <h1 className="text-3xl font-black italic text-orange-600 mb-6 text-center">DF-CO</h1>
+          <input type="email" placeholder="Email" className="w-full p-3 mb-3 bg-zinc-900 border border-zinc-800 rounded-xl outline-none text-orange-500" onChange={(e) => setEmail(e.target.value)} />
+          <input type="password" placeholder="Key" className="w-full p-3 mb-6 bg-zinc-900 border border-zinc-800 rounded-xl outline-none text-orange-500" onChange={(e) => setPassword(e.target.value)} />
+          <button onClick={handleLogin} className="w-full bg-orange-600 p-3 rounded-xl font-black italic uppercase shadow-lg">Connect</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-black text-white p-4 md:p-10 font-mono">
-      <div className="max-w-4xl mx-auto">
-        {/* HEADER */}
-        <div className="flex justify-between items-center mb-10 border-b border-zinc-900 pb-6">
-          <div>
-            <h2 className="text-2xl font-black text-orange-600 italic tracking-tighter uppercase">SYSTEM // {user.name}</h2>
-            <p className="text-[10px] text-zinc-500 tracking-[0.3em] uppercase">{user.job}</p>
+    <div className="min-h-screen bg-black text-white p-4 font-mono flex flex-col md:flex-row gap-6">
+      {/* SIDEBAR: CREW & CHAT SELECTION */}
+      <div className="w-full md:w-1/3 space-y-4">
+        <div className="bg-[#080808] border border-zinc-900 p-6 rounded-[2.5rem]">
+          <h2 className={`text-xl font-black italic mb-4 ${user.role === "ADMIN" ? "text-red-600" : "text-white"}`}>{user.name}</h2>
+          <button onClick={() => setChatRoom("Global")} className={`w-full p-3 rounded-xl mb-2 text-xs font-bold uppercase border ${chatRoom === "Global" ? "border-orange-600 bg-orange-600/10 text-orange-600" : "border-zinc-800 text-zinc-500"}`}>Crew Chat</button>
+          <div className="space-y-2 mt-4">
+            <p className="text-[10px] text-zinc-600 font-black uppercase tracking-widest">Direct Messages</p>
+            {allUsers.filter(u => u.email !== user.email).map(u => (
+              <button key={u.email} onClick={() => setChatRoom(u.email)} className={`w-full p-3 rounded-xl text-left text-xs font-bold border transition-all ${chatRoom === u.email ? "border-orange-600 text-orange-600" : "border-zinc-900 text-zinc-500"}`}>
+                {u.name} <span className="float-right text-[8px] opacity-50">{u.status}</span>
+              </button>
+            ))}
           </div>
-          <button onClick={() => setIsLogged(false)} className="bg-zinc-900 border border-zinc-800 px-6 py-2 rounded-xl text-xs font-bold hover:text-red-500 transition-colors">DISCONNECT</button>
         </div>
 
-        {/* STAFF PANEL */}
+        {/* MISSION PANEL FOR STAFF */}
         {user.role !== "ADMIN" && (
-          <div className="grid gap-6">
-            <div className="bg-[#080808] border border-orange-600/30 rounded-[2.5rem] p-8 shadow-[0_0_30px_rgba(234,88,12,0.05)]">
-              <p className="text-orange-500 text-[10px] font-black uppercase tracking-widest mb-2">Active Mission</p>
-              <h3 className={`text-3xl font-black italic mb-8 ${status === "WAITING" ? "animate-pulse text-yellow-500" : "text-white"}`}>
-                {status === "WAITING" ? ">> AWAITING ORDERS <<" : currentMission}
-              </h3>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <button onClick={() => updateMyStatus("DONE", "Mission Completed. Waiting...")} className="bg-green-600/20 border border-green-500/50 p-4 rounded-2xl font-black uppercase text-green-500 hover:bg-green-600/40 transition-all">Mission Accomplished</button>
-                <button onClick={() => updateMyStatus("WAITING", "Waiting for Sigma Dad...")} className="bg-orange-600/20 border border-orange-500/50 p-4 rounded-2xl font-black uppercase text-orange-500 hover:bg-orange-600/40 transition-all">Request New Mission</button>
-                <button onClick={() => updateMyStatus("WORKING", sideQuests[Math.floor(Math.random()*sideQuests.length)])} className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl font-black uppercase text-zinc-400 hover:bg-zinc-800 transition-all col-span-full">Generate Side-Quest</button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ADMIN PANEL */}
-        {user.role === "ADMIN" && (
-          <div className="space-y-6">
-            <h3 className="text-orange-600 font-black italic tracking-widest uppercase mb-4 text-sm">Crew Control Center</h3>
-            {allUsers.filter(u => u.role !== "ADMIN").map((member) => (
-              <div key={member.email} className="bg-[#080808] border border-zinc-800 p-6 rounded-[2.5rem] flex flex-col gap-4">
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-4">
-                    <div className={`w-3 h-3 rounded-full ${member.status === "WAITING" ? "bg-yellow-500 animate-ping" : member.status === "WORKING" ? "bg-blue-500" : "bg-green-500"}`}></div>
-                    <div>
-                      <p className="font-black italic text-xl uppercase tracking-tighter">{member.name}</p>
-                      <p className="text-[10px] text-zinc-600 font-bold uppercase">{member.status} // {member.job}</p>
-                    </div>
-                  </div>
-                  <div className="text-orange-500 font-black text-2xl italic">{member.balance} €</div>
-                </div>
-
-                <div className="text-zinc-400 text-sm italic bg-black/50 p-3 rounded-xl border border-zinc-900">
-                  Current: {member.currentMission}
-                </div>
-
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    placeholder="Type new mission..." 
-                    className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 text-sm outline-none focus:border-orange-600"
-                    onChange={(e) => setNewMissionText(e.target.value)}
-                  />
-                  <button 
-                    onClick={() => assignMission(member.email)}
-                    className="bg-orange-600 px-6 py-2 rounded-xl font-black italic uppercase text-xs hover:bg-orange-500 active:scale-95 transition-all"
-                  >
-                    Deploy
-                  </button>
-                </div>
-              </div>
-            ))}
+          <div className="bg-[#080808] border border-orange-600/20 p-6 rounded-[2.5rem] space-y-4">
+             <p className="text-orange-500 text-[10px] font-black uppercase">Current Mission</p>
+             <p className="text-xl font-black italic leading-tight">{allUsers.find(u => u.email === user.email)?.currentMission || "None"}</p>
+             <button onClick={() => updateStatus(user.email, "WAITING", ">> AWAITING ORDERS <<")} className="w-full bg-orange-600/20 border border-orange-600 p-3 rounded-xl font-black uppercase text-[10px] text-orange-600">Request Mission</button>
+             <button onClick={() => updateStatus(user.email, "WORKING", sideQuests[Math.floor(Math.random()*sideQuests.length)])} className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded-xl font-black uppercase text-[10px] text-zinc-500">Side-Quest</button>
           </div>
         )}
       </div>
+
+      {/* CENTER: CHAT WINDOW */}
+      <div className="flex-1 flex flex-col bg-[#050505] border border-zinc-900 rounded-[3rem] overflow-hidden min-h-[600px]">
+        <div className="p-6 border-b border-zinc-900 bg-zinc-900/20">
+          <p className="text-xs font-black uppercase text-orange-600 italic tracking-[0.2em]">Channel: {chatRoom === "Global" ? "CREW-NETWORK" : `DM / ${allUsers.find(u => u.email === chatRoom)?.name}`}</p>
+        </div>
+        <div className="flex-1 p-6 overflow-y-auto space-y-4">
+          {messages.map((m) => (
+            <div key={m.id} className={`flex flex-col ${m.senderEmail === user.email ? "items-end" : "items-start"}`}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className={`text-[10px] font-black uppercase ${m.senderEmail === 'darkfox.tobias@outlook.com' ? 'text-red-600' : 'text-white'}`}>{m.sender}</span>
+                {user.role === "ADMIN" && (
+                  <button onClick={() => deleteMessage(m.id)} className="text-[8px] text-zinc-700 hover:text-red-500 uppercase font-bold">[Delete]</button>
+                )}
+              </div>
+              <div className={`p-3 rounded-2xl max-w-[80%] text-sm ${m.senderEmail === user.email ? "bg-orange-600 text-white rounded-tr-none" : "bg-zinc-900 text-zinc-300 rounded-tl-none"}`}>
+                {m.text}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="p-6 bg-black border-t border-zinc-900 flex gap-3">
+          <input value={inputMsg} onChange={(e) => setInputMsg(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendChat()} placeholder="Transmit message..." className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 text-sm outline-none focus:border-orange-600" />
+          <button onClick={sendChat} className="bg-orange-600 px-6 py-2 rounded-xl font-black italic uppercase text-xs">Send</button>
+        </div>
+      </div>
+
+      {/* RIGHT: ADMIN CONTROLS */}
+      {user.role === "ADMIN" && (
+        <div className="w-full md:w-1/3 space-y-4">
+          <p className="text-red-600 text-[10px] font-black uppercase tracking-widest ml-4">Commander Interface</p>
+          {allUsers.filter(u => u.role !== "ADMIN").map((u) => (
+            <div key={u.email} className="bg-[#080808] border border-zinc-900 p-5 rounded-[2rem] space-y-3">
+              <div className="flex justify-between items-center">
+                <span className={`text-xs font-black uppercase ${u.status === 'WAITING' ? 'text-yellow-500 animate-pulse' : 'text-zinc-500'}`}>{u.name} // {u.status}</span>
+                <span className="text-orange-600 font-black italic">{u.balance} €</span>
+              </div>
+              <p className="text-[10px] text-zinc-600 italic bg-black p-2 rounded-lg border border-zinc-900">Current: {u.currentMission}</p>
+              <div className="flex gap-2">
+                <input 
+                  onChange={(e) => setNewMissionText({...newMissionText, [u.email]: e.target.value})} 
+                  placeholder="New Order..." 
+                  className="flex-1 bg-black border border-zinc-800 rounded-lg px-3 text-[10px] outline-none focus:border-red-600" 
+                />
+                <button onClick={() => updateStatus(u.email, "WORKING", newMissionText[u.email])} className="bg-red-600/20 border border-red-600 text-red-600 px-3 py-1 rounded-lg text-[10px] font-black uppercase hover:bg-red-600 hover:text-white transition-all tracking-tighter">Deploy</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
