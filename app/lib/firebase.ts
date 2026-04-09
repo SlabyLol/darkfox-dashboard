@@ -1,16 +1,30 @@
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { getDatabase } from "firebase/database";
 
+/**
+ * @project DarkFox Terminal V3
+ * @version 1.0.1
+ * @copyright 2026 DarkFox Co.
+ */
+
 const firebaseConfig = {
-  apiKey: "AIzaSyBhu6xGZ3WjsAu9QSi02zyLP6KoNNEY1yE",
-  authDomain: "df-dashboard-afd9e.firebaseapp.com",
+  // Diese Werte ziehen wir sicher aus den Railway-Umgebungsvariablen
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
   projectId: "df-dashboard-afd9e",
-  storageBucket: "df-dashboard-afd9e.firebasestorage.app",
-  messagingSenderId: "1002536633152",
-  appId: "1:1002536633152:web:58f42de855e5ed50ef70a5",
-  measurementId: "G-HZXZ3MZW92",
+  storageBucket: "df-dashboard-afd9e.appspot.com",
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  
+  // DEINE LIVE DB URL (EU-WEST1)
   databaseURL: "https://df-dashboard-afd9e-default-rtdb.europe-west1.firebasedatabase.app"
 };
 
-const app = initializeApp(firebaseConfig);
-export const db = getDatabase(app);
+// Next.js Singleton Initialisierung
+// Verhindert, dass bei jedem Refresh eine neue Verbindung aufgebaut wird
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+
+// Initialisiere die Realtime Database Instanz
+const db = getDatabase(app);
+
+export { db };
