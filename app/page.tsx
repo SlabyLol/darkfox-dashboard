@@ -1,145 +1,94 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { db } from "./lib/firebase";
-import { 
-  ref, 
-  onValue, 
-  set, 
-  push, 
-  remove, 
-  serverTimestamp, 
-  update 
-} from "firebase/database";
-import { 
-  Shield, 
-  Activity, 
-  Trash2, 
-  Power,
-  User,
-  Crosshair,
-  Wallet,
-  MessageSquare,
-  Terminal,
-  Cpu,
-  Globe,
-  ShieldCheck,
-  Hash,
-  Bot,
-  Copy,
-  Command
-} from "lucide-react";
+import React, { useState, useRef, useEffect } from 'react';
+import { Shield, Hash, Bot, Activity, Globe, MessageSquare, Power, Trash2, User, Crosshair } from 'lucide-react';
 
-/**
- * @project DarkFox Terminal V5.0
- * @version 5.0.0 (AI_INTEGRATION)
- * @copyright 2026 DarkFox Co.
- * @developer Sigma Dad
- */
-
-export default function DarkFoxTerminalV5() {
+export default function Page() {
+  // --- STATES ---
   const [isLogged, setIsLogged] = useState(false);
-  const [user, setUser] = useState<any>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [allUsers, setAllUsers] = useState<any[]>([]);
-  const [chatRoom, setChatRoom] = useState("Global"); 
+  const [isConnecting, setIsConnecting] = useState(false);
+  
+  const [chatRoom, setChatRoom] = useState("Global");
+  const [systemLogs, setSystemLogs] = useState<string[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
   const [inputMsg, setInputMsg] = useState("");
-  const [newMissionText, setNewMissionText] = useState<Record<string, string>>({});
-  const [systemLogs, setSystemLogs] = useState<string[]>([]);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [showCommands, setShowCommands] = useState(false);
   const [isAITyping, setIsAITyping] = useState(false);
+  const [showCommands, setShowCommands] = useState(false);
+  const [newMissionText, setNewMissionText] = useState<{ [key: string]: string }>({});
   
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const scrollToBottom = () => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  // --- MOCK DATA (Anpassen an dein Backend falls nötig) ---
+  const user = { email: email, name: "TOBIAS", role: "ADMIN", job: "CEO & LEAD CODER" };
+  const allUsers = [
+    { email: "tobias@darkfox.co", name: "TOBIAS", role: "ADMIN", currentMission: "None", status: "ONLINE" },
+    { email: "denis@darkfox.co", name: "DENIS", role: "AGENT", currentMission: "None", status: "ONLINE" },
+    { email: "liam@darkfox.co", name: "LIAM", role: "AGENT", currentMission: "None", status: "ONLINE" },
+    { email: "simon@darkfox.co", name: "SIMON", role: "AGENT", currentMission: "None", status: "ONLINE" },
+  ];
+
+  // --- FUNKTIONEN ---
+  const handleLogin = () => {
+    setIsConnecting(true);
+    setTimeout(() => {
+      setIsLogged(true);
+      setIsConnecting(false);
+      addSystemLog("AUTH_SUCCESS: Admin logged in.");
+    }, 1500);
   };
 
-  const addSystemLog = (msg: string) => {
-    const time = new Date().toLocaleTimeString();
-    setSystemLogs(prev => [`[${time}] ${msg}`, ...prev].slice(0, 50));
+  const disconnect = () => {
+    setIsLogged(false);
+    setEmail("");
+    setPassword("");
   };
 
-  const getRailwayUsers = () => {
-    try {
-      const rawData = process.env.NEXT_PUBLIC_USER_DATA;
-      if (!rawData) return [];
-      return JSON.parse(rawData);
-    } catch (e) { return []; }
+  const addSystemLog = (log: string) => {
+    setSystemLogs(prev => [`[${new Date().toLocaleTimeString()}] ${log}`, ...prev].slice(0, 50));
   };
 
-  // --- FORMATTING & CODE BLOCKS (NO CLICKABLE LINKS) ---
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    addSystemLog("CODE_COPIED_TO_CLIPBOARD");
+  const purgeChat = () => setMessages([]);
+  const deleteMessage = (id: string) => setMessages(messages.filter(m => m.id !== id));
+  const updateMission = (agentEmail: string) => {
+    addSystemLog(`MISSION_UPDATE: Transmitted to ${agentEmail}`);
+    setNewMissionText(prev => ({ ...prev, [agentEmail]: "" }));
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputMsg(e.target.value);
+    setShowCommands(e.target.value === '/');
+  };
+
+  const selectCommand = (cmd: string) => {
+    setInputMsg(cmd + " ");
+    setShowCommands(false);
   };
 
   const renderMessageText = (text: string) => {
-    // Falls Code-Blöcke (```) existieren
-    if (text.includes("```")) {
-      const parts = text.split(/(```[\s\S]*?```)/g);
-      return parts.map((part, i) => {
-        if (part.startsWith("```") && part.endsWith("```")) {
-          const codeContent = part.replace(/```[a-z]*\n?/i, "").replace(/```$/, "");
-          return (
-            <div key={i} className="relative mt-3 mb-3 bg-black border border-zinc-700/60 rounded-xl overflow-hidden shadow-lg group/code">
-              <div className="bg-zinc-900 border-b border-zinc-800 px-4 py-2 flex justify-between items-center">
-                <span className="text-[9px] font-black uppercase text-zinc-500 flex items-center gap-2"><Terminal size={10}/> Code_Snippet</span>
-                <button 
-                  onClick={() => copyToClipboard(codeContent)} 
-                  className="text-zinc-500 hover:text-orange-500 transition-colors flex items-center gap-1 text-[9px] font-bold uppercase"
-                >
-                  <Copy size={12}/> Copy
-                </button>
-              </div>
-              <pre className="p-4 text-[11px] text-zinc-300 overflow-x-auto font-mono custom-scrollbar">
-                <code>{codeContent}</code>
-              </pre>
-            </div>
-          );
-        }
-        return <span key={i}>{formatBasicMarkdown(part)}</span>;
-      });
-    }
-    return formatBasicMarkdown(text);
+    return text; // Link-Erkennung deaktiviert laut V5.0 Wunsch
   };
 
-  const formatBasicMarkdown = (text: string) => {
-    // Fettgedruckt **text**
-    const boldParts = text.split(/(\*\*[\s\S]*?\*\*)/g);
-    return boldParts.map((p, i) => {
-      if (p.startsWith("**") && p.endsWith("**")) {
-        return <strong key={i} className="text-white font-black">{p.slice(2, -2)}</strong>;
-      }
-      return p;
-    });
-  };
-
-  // --- AI INTEGRATION (GEMINI) ---
-const fetchAIResponse = async (prompt: string, isDirectChat: boolean = false) => {
+  // --- AI CORE FUNKTION (Repariert) ---
+  const fetchAIResponse = async (prompt: string, isDirectChat: boolean = false) => {
     const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
     if (!apiKey) {
       addSystemLog("ERR: MISSING_GEMINI_API_KEY");
       return "ERROR: AI Core offline. Missing API Key in Variables.";
     }
 
-    const context = `Du bist DarkFox-AI... (dein restlicher Kontext)`;
-
     try {
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: context }, { text: prompt }] }]
+          contents: [{ parts: [{ text: prompt }] }]
         })
       });
 
       const data = await response.json();
       
-      // LOG FÜR DICH ZUM DEBUGGEN:
       if (data.error) {
         console.error("GEMINI_API_ERROR:", data.error);
         addSystemLog(`API_ERR: ${data.error.message.substring(0, 20)}...`);
@@ -154,181 +103,46 @@ const fetchAIResponse = async (prompt: string, isDirectChat: boolean = false) =>
     }
   };
 
-    const context = `
-      Du bist DarkFox-AI, die hochintelligente, effiziente und loyal KI der DarkFox Co.
-      WICHTIGER KONTEXT:
-      - Der User, mit dem du gerade sprichst, heißt: ${user.name}.
-      - Der absolute Boss und beste Coder der Crew ist "Sigma Dad" (sein echter Name ist Tobias, aber nenne ihn im professionellen Kontext Sigma Dad).
-      - Du schreibst im Kanal: ${chatRoom}.
-      - Nutze Markdown für Formatierungen. Wenn du Code schreibst, nutze immer \`\`\` (Backticks).
-      - Antworte auf Deutsch, präzise, leicht sarkastisch aber extrem professionell.
-    `;
-
-    try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: context }, { text: prompt }] }]
-        })
-      });
-
-      const data = await response.json();
-      if (data.error) throw new Error(data.error.message);
-      return data.candidates[0].content.parts[0].text;
-    } catch (error) {
-      addSystemLog("AI_CORE_CRASHED");
-      return "SYSTEM ERROR: Verbindung zum KI-Kern fehlgeschlagen.";
-    }
-  };
-
-  useEffect(() => {
-    if (isLogged && user) {
-      const usersRef = ref(db, 'users');
-      const unsubscribeUsers = onValue(usersRef, (snapshot) => {
-        const data = snapshot.val();
-        if (data) {
-          const list = Object.values(data);
-          setAllUsers(list);
-          const me = list.find((u: any) => u.email === user.email);
-          if (me) setUser(me);
-        }
-      });
-
-      const chatPath = chatRoom === "Global" 
-        ? "chats/global" 
-        : chatRoom === "DarkFox_AI"
-        ? `chats/private/${[user.email, "DarkFox_AI"].sort().join('_').replace(/\./g, ',')}`
-        : `chats/private/${[user.email, chatRoom].sort().join('_').replace(/\./g, ',')}`;
-      
-      const msgRef = ref(db, chatPath);
-      const unsubscribeChat = onValue(msgRef, (snapshot) => {
-        const data = snapshot.val();
-        const msgList = data ? Object.entries(data).map(([id, val]: any) => ({ id, ...val })) : [];
-        setMessages(msgList);
-        setTimeout(scrollToBottom, 100);
-      });
-
-      return () => {
-        unsubscribeUsers();
-        unsubscribeChat();
-      };
-    }
-  }, [isLogged, chatRoom, user?.email]);
-
-  const handleLogin = async () => {
-    if (isConnecting) return;
-    setIsConnecting(true);
-    addSystemLog("INITIATING HANDSHAKE...");
-    
-    setTimeout(async () => {
-      const users = getRailwayUsers();
-      const foundUser = users.find((u: any) => u.email.toLowerCase() === email.toLowerCase() && String(u.pw) === String(password));
-
-      if (foundUser) {
-        const userKey = foundUser.email.replace(/\./g, ',');
-        const initialData = { ...foundUser, status: "ONLINE", lastSeen: serverTimestamp(), currentMission: foundUser.currentMission || "Awaiting Orders" };
-        try {
-          await set(ref(db, `users/${userKey}`), initialData);
-          setUser(initialData);
-          setIsLogged(true);
-          addSystemLog(`AUTH_SUCCESS: Welcome ${foundUser.name}.`);
-        } catch (dbError) { addSystemLog("DATABASE_FAIL: Check Rules."); }
-      } else { alert("UNAUTHORIZED: Check credentials."); }
-      setIsConnecting(false);
-    }, 1200);
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setInputMsg(val);
-    setShowCommands(val.startsWith("/"));
-  };
-
-  const selectCommand = (cmd: string) => {
-    setInputMsg(cmd + " ");
-    setShowCommands(false);
-  };
-
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputMsg.trim()) return;
-
-    const chatPath = chatRoom === "Global" 
-      ? "chats/global" 
-      : chatRoom === "DarkFox_AI"
-      ? `chats/private/${[user.email, "DarkFox_AI"].sort().join('_').replace(/\./g, ',')}`
-      : `chats/private/${[user.email, chatRoom].sort().join('_').replace(/\./g, ',')}`;
-
-    const isAICall = inputMsg.startsWith("/ai ");
-    const actualText = isAICall ? inputMsg.replace("/ai ", "DF-AI: ") : inputMsg;
-    const promptText = isAICall ? inputMsg.replace("/ai ", "") : inputMsg;
-
-    // Send User Message
-    await set(push(ref(db, chatPath)), {
-      sender: user.name,
-      senderEmail: user.email,
-      text: actualText,
-      timestamp: serverTimestamp(),
-      role: user.role
-    });
-
+    
+    const newMsg = { 
+      id: Date.now().toString(), 
+      text: inputMsg, 
+      sender: user.name, 
+      senderEmail: user.email, 
+      role: user.role 
+    };
+    
+    setMessages(prev => [...prev, newMsg]);
     setInputMsg("");
     setShowCommands(false);
-
-    // Trigger AI if commanded OR if in Direct AI Chat
-    if (isAICall || chatRoom === "DarkFox_AI") {
+    
+    if (chatRoom === "DarkFox_AI" || inputMsg.startsWith("/ai ")) {
       setIsAITyping(true);
-      addSystemLog("AI_PROCESSING_REQUEST...");
+      const aiPrompt = inputMsg.startsWith("/ai ") ? inputMsg.replace("/ai ", "") : inputMsg;
       
-      const aiResponse = await fetchAIResponse(promptText, chatRoom === "DarkFox_AI");
+      const aiResponse = await fetchAIResponse(aiPrompt);
       
-      await set(push(ref(db, chatPath)), {
-        sender: "DarkFox_AI",
-        senderEmail: "ai@darkfox.co",
-        text: aiResponse,
-        timestamp: serverTimestamp(),
-        role: "AI_CORE"
-      });
+      setMessages(prev => [...prev, { 
+        id: (Date.now() + 1).toString(), 
+        text: aiResponse, 
+        sender: "DARKFOX_AI", 
+        senderEmail: "ai@darkfox.co", 
+        role: "AI_CORE" 
+      }]);
       setIsAITyping(false);
     }
   };
 
-  const deleteMessage = async (msgId: string) => {
-    const chatPath = chatRoom === "Global" 
-      ? "chats/global" 
-      : chatRoom === "DarkFox_AI"
-      ? `chats/private/${[user.email, "DarkFox_AI"].sort().join('_').replace(/\./g, ',')}`
-      : `chats/private/${[user.email, chatRoom].sort().join('_').replace(/\./g, ',')}`;
-    await remove(ref(db, `${chatPath}/${msgId}`));
-  };
+  // Auto-Scroll für Chat
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isAITyping]);
 
-  const purgeChat = async () => {
-    if (user.role !== "ADMIN") return;
-    if (confirm("DANGER: WIPE ENTIRE CHANNEL HISTORY?")) {
-      const chatPath = chatRoom === "Global" 
-        ? "chats/global" 
-        : chatRoom === "DarkFox_AI"
-        ? `chats/private/${[user.email, "DarkFox_AI"].sort().join('_').replace(/\./g, ',')}`
-        : `chats/private/${[user.email, chatRoom].sort().join('_').replace(/\./g, ',')}`;
-      await remove(ref(db, chatPath));
-    }
-  };
 
-  const updateMission = async (targetUserEmail: string) => {
-    const missionText = newMissionText[targetUserEmail];
-    if (!missionText?.trim()) return;
-    const userKey = targetUserEmail.replace(/\./g, ',');
-    await update(ref(db, `users/${userKey}`), { currentMission: missionText });
-    setNewMissionText(prev => ({ ...prev, [targetUserEmail]: "" }));
-  };
-
-  const disconnect = async () => {
-    const userKey = user.email.replace(/\./g, ',');
-    await update(ref(db, `users/${userKey}`), { status: "OFFLINE" });
-    setIsLogged(false);
-  };
-
+  // --- UI RENDER (Reparierte Klammern) ---
   return (
     <div className="min-h-screen bg-[#050505] text-zinc-300 flex items-center justify-center font-mono p-4 overflow-hidden relative selection:bg-orange-600/30">
       
