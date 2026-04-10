@@ -119,12 +119,40 @@ export default function DarkFoxTerminalV5() {
   };
 
   // --- AI INTEGRATION (GEMINI) ---
-  const fetchAIResponse = async (prompt: string, isDirectChat: boolean = false) => {
+const fetchAIResponse = async (prompt: string, isDirectChat: boolean = false) => {
     const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
     if (!apiKey) {
       addSystemLog("ERR: MISSING_GEMINI_API_KEY");
       return "ERROR: AI Core offline. Missing API Key in Variables.";
     }
+
+    const context = `Du bist DarkFox-AI... (dein restlicher Kontext)`;
+
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: context }, { text: prompt }] }]
+        })
+      });
+
+      const data = await response.json();
+      
+      // LOG FÜR DICH ZUM DEBUGGEN:
+      if (data.error) {
+        console.error("GEMINI_API_ERROR:", data.error);
+        addSystemLog(`API_ERR: ${data.error.message.substring(0, 20)}...`);
+        throw new Error(data.error.message);
+      }
+
+      return data.candidates[0].content.parts[0].text;
+    } catch (error: any) {
+      console.error("AI_FETCH_FAILED:", error);
+      addSystemLog("AI_CORE_CRASHED");
+      return `SYSTEM ERROR: Verbindung fehlgeschlagen. (${error.message || "Unknown Error"})`;
+    }
+  };
 
     const context = `
       Du bist DarkFox-AI, die hochintelligente, effiziente und loyal KI der DarkFox Co.
